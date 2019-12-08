@@ -43,7 +43,7 @@ function checkIfPosted(id) {
 }
 
 // Add to the posted videos list
-function postedVideo(id) {
+function setAsPosted(id) {
     let posts = JSON.parse(fs.readFileSync(posts_file, {encoding: "utf-8"}));
 
     posts.push(id);
@@ -57,16 +57,15 @@ function postedVideo(id) {
 
 // Add a post to the Twitter queue
 function addToQueue(post) {
-    // Mark the post as posted
-    postedVideo(post.id);
-
     // Don't post videos
     if (post.is_video) {
+        setAsPosted(post.id);
         return;
     }
 
     // Make sure the file format is correct
     if (![".gif", ".png", ".jpg", ".jpeg"].includes(path.extname(post.url))) {
+        setAsPosted(post.id);
         return;
     }
 
@@ -132,6 +131,7 @@ async function checkForQueue() {
             // Post the reply
             Twitter.post('statuses/update', sourceTweet, (err, data, response) => {
                 console.log(chalk.green(`"${post.title}" posted!`));
+                setAsPosted(post.id);
             });
         });
     });
