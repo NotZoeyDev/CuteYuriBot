@@ -46,10 +46,12 @@ function checkIfPosted(id) {
 function setAsPosted(id) {
     let posts = JSON.parse(fs.readFileSync(posts_file, {encoding: "utf-8"}));
 
+    // Add the end of the posts json
     posts.push(id);
 
     if (posts.length > 30) {
-        posts.pop();
+        // Remove first item
+        posts.unshift();
     }
 
     fs.writeFileSync(posts_file, JSON.stringify(posts), {encoding: "utf-8"});
@@ -71,7 +73,7 @@ function addToQueue(post) {
 
     console.log(chalk.green(`"${post.title}" added to the queue!`));
 
-    queue.push({
+    queue.unshift({
         "title": post.title,
         "link": `https://reddit.com${post.permalink}`,
         "url": post.url,
