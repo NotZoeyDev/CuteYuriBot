@@ -51,7 +51,7 @@ function setAsPosted(id) {
 
     if (posts.length > 30) {
         // Remove first item
-        posts.unshift();
+        posts.shift();
     }
 
     fs.writeFileSync(posts_file, JSON.stringify(posts), {encoding: "utf-8"});
@@ -92,6 +92,8 @@ async function urlToBase64(url) {
 
 // Create tweets from our queue
 async function checkForQueue() {
+    console.log(queue);
+
     console.log(chalk.blue(`Checking for posts in the queue.`));
 
     // Make sure the queue isn't empty
@@ -145,7 +147,7 @@ async function checkForPosts(name) {
     let listings = await Reddit.getSubreddit(name).getNew();
 
     // Go through the new posts
-    for (let post of listings) {
+    for (let post of listings.reverse()) {
         // Make sure it wasn't posted already
         if (!checkIfPosted(post.id)) {
             console.log(chalk.yellow(`Adding "${post.title}" to the queue.`));
