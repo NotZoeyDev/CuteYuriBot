@@ -57,15 +57,15 @@ function setAsPosted(id) {
 
 // Add a post to the Twitter queue
 function addToQueue(post) {
+    setAsPosted(post.id);
+
     // Don't post videos
     if (post.is_video) {
-        setAsPosted(post.id);
         return;
     }
 
     // Make sure the file format is correct
     if (![".gif", ".png", ".jpg", ".jpeg"].includes(path.extname(post.url))) {
-        setAsPosted(post.id);
         return;
     }
 
@@ -131,7 +131,6 @@ async function checkForQueue() {
             // Post the reply
             Twitter.post('statuses/update', sourceTweet, (err, data, response) => {
                 console.log(chalk.green(`"${post.title}" posted!`));
-                setAsPosted(post.id);
             });
         });
     });
