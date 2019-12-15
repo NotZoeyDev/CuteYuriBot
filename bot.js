@@ -49,7 +49,7 @@ function setAsPosted(id) {
     // Add the end of the posts json
     posts.push(id);
 
-    if (posts.length > 30) {
+    if (posts.length > configs.subs.length * 50) {
         // Remove first item
         posts.shift();
     }
