@@ -1,173 +1,209 @@
 /**
  * CuteYuriBot
- * By: @ZoeyLovesMiki
+ * A reddit mirroring bot
+ * @ZoeyLovesMiki
  */
 
-// Imports
-let twit = require('twit'),
-    snoowrap = require('snoowrap'),
-    axios = require('axios'),
-    chalk = require('chalk'),
-    fs = require('fs'),
-    path = require('path');
+const fs = require('fs');
+const path = require('path');
+const fetch = require('node-fetch');
+const Jimp = require('jimp');
 
-if (!fs.existsSync("config.json"))
-    throw "No config file found!";
+/**
+ * Load our config file
+ */
+const configs = require('./config.json');
 
-// Import our config file
-let configs = require('./config.json');
+/**
+ * Prepare Twitter
+ */
+const twit = require('twit');
+const Twitter = new twit(configs.twitter);
 
-// Create a Twitter instance
-let Twitter = new twit(configs.twitter);
+/**
+ * Prepare Reddit
+ */
+const snoowrap = require('snoowrap');
+const Reddit = new snoowrap(configs.reddit);
 
-// Create a Reddit instance
-let Reddit = new snoowrap(configs.reddit);
+/**
+ * Prepare our database
+ */
+const knex = require('knex');
+const { resolve } = require('path');
+const db = knex({
+  client: 'sqlite3',
+  connection: {
+    filename: './queue.db'
+  }
+});
 
-// Our file that keeps a copy of our posts
-const posts_file = "posts.json";
+// Create our table if it doesn't exist
+db.schema.hasTable('posts', exists => {
+  if (exists) return;
 
-// Queue of posts
-let queue = [];
+  db.schema.createTable('posts', table => {
+    table.increments('id');
+    table.string('title');
+    table.string('post_id');
+    table.string('img_url');
+    table.string('post_url');
+    table.string('source_url');
+    table.boolean('posted').defaultTo(false);
+  });
+});
 
-// Check if post wasn't posted already
-function checkIfPosted(id) {
-    // Create an empty file if it doesn't exist.
-    if (!fs.existsSync(posts_file)) {
-        fs.writeFileSync(posts_file, JSON.stringify([]), {encoding: "utf-8"});
-    }
+/**
+ * Get the source via SauceNAO
+ */
+async function getSource(image_url) {
+  return new Promise((resvole, reject) => {
+    fetch(`https://saucenao.com/search.php?db=999&output_type=2&numres=1&api_key=${configs.saucenao_key}&url=${image_url}`)
+      .then(res => res.json())
+      .then(json => {
+        const source_url = json.results[0].data.ext_urls[0];
 
-    // Load our posts file
-    let posts = JSON.parse(fs.readFileSync(posts_file, {encoding: "utf-8"}));
-
-    return posts.includes(id);
+        resolve(source_url);
+      })
+      .catch(error => {
+        resvole("");
+      });
+  });
 }
 
-// Add to the posted videos list
-function setAsPosted(id) {
-    let posts = JSON.parse(fs.readFileSync(posts_file, {encoding: "utf-8"}));
+/**
+ * Post the next item in the queue 
+ */
+async function postPosts() {
+  // Get the posts that aren't posted
+  const posts = await db('posts').where('posted', false);
 
-    // Add the end of the posts json
-    posts.push(id);
+  if (posts.length == 0) return;
 
-    if (posts.length > configs.subs.length * 50) {
-        // Remove first item
-        posts.shift();
+  // Get the last post in the posts list
+  const post = posts[posts.length - 1];
+
+  // Get the source
+  const source_url = await getSource(post.img_url);
+
+  await db('posts').where('id', post.id).update({source_url: source_url});
+
+  // Get the image as a buffer
+  let image = await fetch(post.img_url);
+  image = image.buffer();
+
+  // Try to compress the image if required
+  const size = Buffer(image, 'base64').byteLength;
+
+  if (size > 5000000) {
+    const jimage = await Jimp.read(image);
+
+    jimage.scale(0.75);
+
+    image = await jimage.getBase64Async(Jimp.AUTO);
+  }
+
+  // Post the image to Twitter
+  Twitter.post('media/upload', { media_data: image.toString('base64') }, (err, data, response) => {
+    if (err) {
+      console.log(`Couldn't post #${post.id}. Trying again later.`);
+      return;
     }
 
-    fs.writeFileSync(posts_file, JSON.stringify(posts), {encoding: "utf-8"});
-}
+    const media = data.media_id_string;
 
-// Add a post to the Twitter queue
-function addToQueue(post) {
-    setAsPosted(post.id);
+    const tweet = {
+      status: post.title,
+      media_ids: [media]
+    };
 
-    // Don't post videos
-    if (post.is_video) {
+    // Post the image to Twitter
+    Twitter.post('statuses/update', tweet, async (err, data, response) => {
+      if (err) {
+        console.log(`Couldn't post #${post.id}. Trying again later.`);
         return;
-    }
+      }
 
-    // Make sure the file format is correct
-    if (![".gif", ".png", ".jpg", ".jpeg"].includes(path.extname(post.url))) {
-        return;
-    }
+      // Get the tweet ID of the image tweet
+      const imageTweetID = data.id_str;
 
-    console.log(chalk.green(`"${post.title}" added to the queue!`));
+      let status = `@${data.user.screen_name} Original post: https://reddit.com${post.post_url}`;
 
-    queue.unshift({
-        "title": post.title,
-        "link": `https://reddit.com${post.permalink}`,
-        "url": post.url,
-        "author": post.author.name
-    });
-}
+      if (source_url != "") {
+        status += `\nSource: ${source_url}`;
+      }
 
-// Retrieve an image as base64
-async function urlToBase64(url) {
-    let response = await axios.get(url, {responseType: 'arraybuffer'});
+      // Create a tweet with the source
+      let sourceTweet = {
+          status: status,
+          in_reply_to_status_id: imageTweetID
+      };
 
-    let base64 = Buffer.from(response.data, 'binary').toString('base64');
-
-    return base64;
-}
-
-// Create tweets from our queue
-async function checkForQueue() {
-    console.log(queue);
-
-    console.log(chalk.blue(`Checking for posts in the queue.`));
-
-    // Make sure the queue isn't empty
-    if (queue.length <= 0) {
-        console.log(chalk.red(`Nothing to post.`));
-        return;
-    }
-
-    // Get our post
-    let post = queue.pop();
-
-    console.log(chalk.yellow(`Posting "${post.title}"...`));
-
-    // Encode the file in base64
-    let b64 = await urlToBase64(post.url);
-
-    // Upload the file to Twitter
-    Twitter.post('media/upload', {media_data: b64 }, (err, data, response) => {
-        // Get our media id
-        let media = data.media_id_string;
-        
-        // Create a tweet
-        let tweet = {
-            status: post.title,
-            media_ids: [media]
-        };
-
-        // Post the image/tweet
-        Twitter.post('statuses/update', tweet, (err, data, response) => {
-            // Get our tweet id
-            let tweetId = data.id_str;
-
-            // Create a tweet with the source
-            let sourceTweet = {
-                status: `@${data.user.screen_name} Posted by ${post.author}.\nOriginal post: ${post.link}`,
-                in_reply_to_status_id: tweetId
-            };
-
-            // Post the reply
-            Twitter.post('statuses/update', sourceTweet, (err, data, response) => {
-                console.log(chalk.green(`"${post.title}" posted!`));
-            });
-        });
-    });
-}
-
-// Main function
-async function checkForPosts(name) {
-    console.log(chalk.blue("Checking for posts."));
-
-    let listings = await Reddit.getSubreddit(name).getNew();
-
-    // Go through the new posts
-    for (let post of listings.reverse()) {
-        // Make sure it wasn't posted already
-        if (!checkIfPosted(post.id)) {
-            console.log(chalk.yellow(`Adding "${post.title}" to the queue.`));
-            addToQueue(post);
+      Twitter.post('statuses/update', sourceTweet, async (err, data, response) => {
+        if (err) {
+          console.log(`Couldn't post #${post.id}. Trying again later.`);
+          return;
         }
-    }
+  
+        await database("posts").where({ id: post.id }).update({ posted: true });
+      });
+    });
+  });
 }
 
-// Load the subreddits from the config file
-for (let sub of configs.subs) {
-    // Create an interval loop to check for posts from that sub
-    setInterval(() => {
-        checkForPosts(sub);
-    }, 1000*60);
+/**
+ * Fetch posts from a subreddit 
+ */ 
+async function fetchPosts(subreddit) {
+  // Get the new posts
+  const posts = await Reddit.getSubreddit(subreddit).getNew();
 
-    // Initial check
-    checkForPosts(sub);
+  for (const post of posts) {
+    // Check if we have more than 50 upvotes
+    if (post.ups <= 50) continue;
+
+    // Check if the post is already in our database
+    const postInDb = await db('posts').where('post_id', post.id);
+    if (postInDb.length > 0) continue;
+    
+    // Check if the post url is already in our database
+    const urlInDb = await db('posts').where('img_url', post.url);
+    if (urlInDb.length > 0) continue;
+    
+    // Skip videos
+    if (post.is_video) continue;
+
+    // Check if it's a valid format
+    const extname = path.extname(post.url).replace(".", "");
+
+    // Skip unsupported formats
+    if (!['gif', 'jpg', 'jpeg', 'png'].includes(extname)) continue;
+
+    // Add the post to the db
+    await db('posts').insert({
+      title: post.title,
+      post_id: post.id,
+      img_url: post.url,
+      post_url: post.permalink,
+      source_url: "",
+    });
+  }
 }
 
-// Post loop
-setInterval(() => {
-    checkForQueue();
-}, 1000*60*15);
+/**
+ * Load our list of subreddits and create a timer to fetch them every minute
+ */
+configs.subs.forEach(subreddit => {
+  fetchPosts(subreddit);
+
+  setTimeout(() => {
+    fetchPosts(subreddit);
+  }, 60*1000);
+});
+
+/**
+ * Loop that will post posts from the queue every 15 minutes
+ */
+setTimeout(() => {
+  postPosts();
+}, 15*60*1000);
