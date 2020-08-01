@@ -37,6 +37,25 @@ const db = knex({
   }
 });
 
+/**
+ * Create our express endpoint to get the db content in a json
+ */
+const express = require('express');
+const app = express();
+
+app.get("/posts.json", async(req, res) => {
+  const posts = await db('posts').select();
+
+  res.json(
+    posts
+  );
+});
+
+app.listen(6900, () => {
+  console.log("Express server is ready!");
+});
+
+
 // Create our table if it doesn't exist
 db.schema.hasTable('posts').then(async exists => {
   if (exists) return;
