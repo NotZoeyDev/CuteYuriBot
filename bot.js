@@ -72,6 +72,7 @@ async function getSource(image_url) {
  */
 async function postPosts() {
   console.log("Checking for posts.");
+
   // Get the posts that aren't posted
   const posts = await db('posts').where('posted', false);
 
@@ -176,8 +177,8 @@ async function fetchPosts(subreddit) {
     // Skip unsupported formats
     if (!['gif', 'jpg', 'jpeg', 'png'].includes(extname)) continue;
 
+    console.log("Adding a new post in the database.");
 
-    console.log("Adding post into db");
     // Add the post to the db
     await db('posts').insert({
       title: post.title,
@@ -203,6 +204,6 @@ configs.subs.forEach(subreddit => {
 /**
  * Loop that will post posts from the queue every 15 minutes
  */
-setInteval(() => {
+setInterval(() => {
   postPosts();
 }, 15*60*1000);
