@@ -6,6 +6,7 @@ To run this bot, you'll need to create your own `config.json` file at the root o
 ```JS
 {
   "subs": ["sub_name_here"],
+  "saucenao_key": "api_key_here",
   "reddit": {
     "userAgent": "My bot/1.0 (By: author)",
     "clientId": "app_id",
@@ -20,4 +21,4 @@ To run this bot, you'll need to create your own `config.json` file at the root o
   }
 }
 ```
-Make sure to install the modules via `npm install` and then run it via `node bot.js`.  
+Make sure to install the modules via `npm install` and then run it using `node bot.js`.  
