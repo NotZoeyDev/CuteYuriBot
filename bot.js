@@ -41,7 +41,10 @@ const db = knex({
  * Create our express endpoint to get the db content in a json
  */
 const express = require('express');
+const cors = require('cors');
 const app = express();
+
+app.use(cors());
 
 app.get("/posts.json", async(req, res) => {
   const posts = await db('posts').select();
