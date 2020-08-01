@@ -30,7 +30,6 @@ const Reddit = new snoowrap(configs.reddit);
  * Prepare our database
  */
 const knex = require('knex');
-const { resolve } = require('path');
 const db = knex({
   client: 'sqlite3',
   connection: {
@@ -39,10 +38,10 @@ const db = knex({
 });
 
 // Create our table if it doesn't exist
-db.schema.hasTable('posts', exists => {
+db.schema.hasTable('posts').then(async exists => {
   if (exists) return;
 
-  db.schema.createTable('posts', table => {
+  await db.schema.createTable('posts', table => {
     table.increments('id');
     table.string('title');
     table.string('post_id');
@@ -57,22 +56,19 @@ db.schema.hasTable('posts', exists => {
  * Get the source via SauceNAO
  */
 async function getSource(image_url) {
-  return new Promise((resvole, reject) => {
-    fetch(`https://saucenao.com/search.php?db=999&output_type=2&numres=1&api_key=${configs.saucenao_key}&url=${image_url}`)
-      .then(res => res.json())
-      .then(json => {
-        const source_url = json.results[0].data.ext_urls[0];
+  try {
+    const res = await fetch(`https://saucenao.com/search.php?db=999&output_type=2&numres=1&api_key=${configs.saucenao_key}&url=${image_url}`);
 
-        resolve(source_url);
-      })
-      .catch(error => {
-        resvole("");
-      });
-  });
+    const json = await res.json();
+
+    return json.results[0].data.ext_urls[0];
+  } catch(e) {
+    return "";
+  }
 }
 
 /**
- * Post the next item in the queue 
+ * Post the next item in the queue
  */
 async function postPosts() {
   // Get the posts that aren't posted
@@ -86,14 +82,16 @@ async function postPosts() {
   // Get the source
   const source_url = await getSource(post.img_url);
 
+  console.log(source_url);
+
   await db('posts').where('id', post.id).update({source_url: source_url});
 
   // Get the image as a buffer
   let image = await fetch(post.img_url);
-  image = image.buffer();
+  image = await image.buffer();
 
   // Try to compress the image if required
-  const size = Buffer(image, 'base64').byteLength;
+  const size = Buffer.from(image).byteLength;
 
   if (size > 5000000) {
     const jimage = await Jimp.read(image);
@@ -144,8 +142,8 @@ async function postPosts() {
           console.log(`Couldn't post #${post.id}. Trying again later.`);
           return;
         }
-  
-        await database("posts").where({ id: post.id }).update({ posted: true });
+
+        await db("posts").where({ id: post.id }).update({ posted: true });
       });
     });
   });
@@ -165,11 +163,11 @@ async function fetchPosts(subreddit) {
     // Check if the post is already in our database
     const postInDb = await db('posts').where('post_id', post.id);
     if (postInDb.length > 0) continue;
-    
+
     // Check if the post url is already in our database
     const urlInDb = await db('posts').where('img_url', post.url);
     if (urlInDb.length > 0) continue;
-    
+
     // Skip videos
     if (post.is_video) continue;
 
@@ -179,6 +177,8 @@ async function fetchPosts(subreddit) {
     // Skip unsupported formats
     if (!['gif', 'jpg', 'jpeg', 'png'].includes(extname)) continue;
 
+
+    console.log("Adding post into db");
     // Add the post to the db
     await db('posts').insert({
       title: post.title,
@@ -207,3 +207,5 @@ configs.subs.forEach(subreddit => {
 setTimeout(() => {
   postPosts();
 }, 15*60*1000);
+
+postPosts();
