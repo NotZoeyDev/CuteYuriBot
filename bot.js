@@ -71,6 +71,7 @@ async function getSource(image_url) {
  * Post the next item in the queue
  */
 async function postPosts() {
+  console.log("Checking for posts.");
   // Get the posts that aren't posted
   const posts = await db('posts').where('posted', false);
 
@@ -81,8 +82,6 @@ async function postPosts() {
 
   // Get the source
   const source_url = await getSource(post.img_url);
-
-  console.log(source_url);
 
   await db('posts').where('id', post.id).update({source_url: source_url});
 
@@ -196,7 +195,7 @@ async function fetchPosts(subreddit) {
 configs.subs.forEach(subreddit => {
   fetchPosts(subreddit);
 
-  setTimeout(() => {
+  setInterval(() => {
     fetchPosts(subreddit);
   }, 60*1000);
 });
@@ -204,8 +203,6 @@ configs.subs.forEach(subreddit => {
 /**
  * Loop that will post posts from the queue every 15 minutes
  */
-setTimeout(() => {
+setInteval(() => {
   postPosts();
 }, 15*60*1000);
-
-postPosts();
